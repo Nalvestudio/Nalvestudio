@@ -1,0 +1,261 @@
+// nalv.estudio — esquema MySQL (Prisma)
+// Reglas: dinero siempre en pesos enteros (Int); fechas en UTC; los archivos
+// (imágenes) NO van en la base: solo su "key" en el almacenamiento (disco/S3/R2).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider     = "mysql"
+  url          = env("DATABASE_URL")
+  relationMode = "foreignKeys"
+}
+
+enum OrderStatus {
+  pendiente_pago
+  pagado
+  en_produccion
+  listo
+  entregado
+  cancelado
+}
+
+enum DeliveryMethod {
+  retiro
+  correo_domicilio
+  correo_sucursal
+}
+
+model User {
+  id           Int       @id @default(autoincrement())
+  name         String    @db.VarChar(120)
+  email        String    @unique @db.VarChar(190)
+  phone        String?   @db.VarChar(40)
+  passwordHash String    @db.VarChar(255) // se conserva el hash scrypt "s1$salt$hash" del sistema actual
+  marketing    Boolean   @default(false)
+  shipDefaults Json? // datos de envío guardados por el cliente
+  createdAt    DateTime  @default(now())
+  orders       Order[]
+  sessions     Session[]
+
+  @@map("users")
+}
+
+/// Login sessions: the cookie holds an opaque random token; only its SHA-256 is stored.
+model Session {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String   @unique @db.Char(64)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model Order {
+  id               Int            @id @default(autoincrement())
+  code             String         @unique @db.VarChar(20) // NALV-0001
+  customerName     String         @db.VarChar(120)
+  customerPhone    String         @db.VarChar(40)
+  customerEmail    String?        @db.VarChar(190)
+  deliveryMethod   DeliveryMethod
+  address          String?        @db.VarChar(255)
+  province         String?        @db.VarChar(80)
+  city             String?        @db.VarChar(120)
+  postalCode       String?        @db.VarChar(12)
+  dni              String?        @db.VarChar(20)
+  branch           String?        @db.VarChar(160)
+  shippingCost     Int            @default(0)
+  shippingWeightKg Decimal        @default(0) @db.Decimal(6, 2)
+  shippingZone     String?        @db.VarChar(40)
+  notes            String?        @db.Text
+  adminNote        String?        @db.Text
+  paymentMethod    String?        @db.VarChar(40)
+  discount         Int            @default(0)
+  total            Int
+  status           OrderStatus    @default(pendiente_pago)
+  marketing        Boolean        @default(false)
+  shareGallery     Boolean        @default(false)
+  userId           Int?
+  user             User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  history OrderStatusEvent[]
+  items   OrderItem[]
+  sheets  Sheet[]
+  shirts  Shirt[]
+  packs   PackLine[]
+
+  @@index([status, createdAt])
+  @@index([customerEmail])
+  @@index([userId])
+  @@map("orders")
+}
+
+model OrderStatusEvent {
+  id      Int         @id @default(autoincrement())
+  orderId Int
+  order   Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  status  OrderStatus
+  at      DateTime    @default(now())
+  note    String?     @db.VarChar(255)
+
+  @@index([orderId, at])
+  @@map("order_status_events")
+}
+
+// Sticker suelto (sheetId = null) o sticker dentro de una plancha (sheetId != null)
+model OrderItem {
+  id         Int      @id @default(autoincrement())
+  orderId    Int
+  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  sheetId    Int?
+  sheet      Sheet?   @relation(fields: [sheetId], references: [id], onDelete: Cascade)
+  widthCm    Decimal  @db.Decimal(4, 1)
+  heightCm   Decimal  @db.Decimal(4, 1)
+  qty        Int
+  unitPrice  Int      @default(0)
+  lineTotal  Int      @default(0)
+  label      String?  @db.VarChar(160)
+  printKey   String   @db.VarChar(255) // imagen lista para imprimir
+  origKey    String?  @db.VarChar(255) // archivo original que subió el cliente
+  thumbKey   String?  @db.VarChar(255)
+  meta       Json? // dpi, calidad, recorte, fondo quitado, etc.
+
+  @@index([orderId])
+  @@index([sheetId])
+  @@map("order_items")
+}
+
+model Sheet {
+  id            Int         @id @default(autoincrement())
+  orderId       Int
+  order         Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  price         Int
+  planchas      Int         @default(1)
+  widthCm       Decimal     @db.Decimal(5, 1)
+  lengthCm      Decimal     @db.Decimal(5, 1)
+  usedLengthCm  Decimal     @db.Decimal(5, 1)
+  items         OrderItem[]
+
+  @@index([orderId])
+  @@map("sheets")
+}
+
+model Shirt {
+  id           Int     @id @default(autoincrement())
+  orderId      Int
+  order        Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  garmentId    String  @db.VarChar(40)
+  garmentLabel String  @db.VarChar(80)
+  size         String  @db.VarChar(10)
+  colorId      String  @db.VarChar(30)
+  colorLabel   String  @db.VarChar(40)
+  colorHex     String  @db.VarChar(9)
+  print        String  @db.VarChar(20)
+  printLabel   String  @db.VarChar(60)
+  qty          Int
+  unitPrice    Int
+  lineTotal    Int
+  label        String? @db.VarChar(160)
+  frontKey     String? @db.VarChar(255)
+  backKey      String? @db.VarChar(255)
+  frontOrigKey String? @db.VarChar(255)
+  backOrigKey  String? @db.VarChar(255)
+  frontThumb   String? @db.VarChar(255)
+  backThumb    String? @db.VarChar(255)
+  frontMeta    Json?
+  backMeta     Json?
+  placements   Json?
+
+  @@index([orderId])
+  @@map("shirts")
+}
+
+model PackLine {
+  id        Int     @id @default(autoincrement())
+  orderId   Int
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  packId    Int?
+  packKey   String? @db.VarChar(60)
+  title     String  @db.VarChar(160)
+  stickers  Int
+  qty       Int
+  unitPrice Int
+  lineTotal Int
+  thumbKey  String? @db.VarChar(255)
+
+  @@index([orderId])
+  @@map("pack_lines")
+}
+
+model GalleryItem {
+  id        Int      @id @default(autoincrement())
+  title     String   @db.VarChar(160)
+  fileKey   String   @db.VarChar(255)
+  thumbKey  String   @db.VarChar(255)
+  hash      String?  @db.VarChar(64)
+  featured  Boolean  @default(false)
+  source    String   @default("propio") @db.VarChar(30)
+  orderCode String?  @db.VarChar(20)
+  createdAt DateTime @default(now())
+
+  @@index([featured, createdAt])
+  @@map("gallery_items")
+}
+
+// Libreta de contactos de marketing (con o sin cuenta)
+model Contact {
+  id          Int       @id @default(autoincrement())
+  key         String    @unique @db.VarChar(190) // "m:email" o "p:telefono"
+  name        String?   @db.VarChar(120)
+  email       String?   @db.VarChar(190)
+  phone       String?   @db.VarChar(40)
+  marketing   Boolean   @default(false)
+  marketingAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@map("contacts")
+}
+
+model Optout {
+  email     String   @id @db.VarChar(190)
+  createdAt DateTime @default(now())
+
+  @@map("optouts")
+}
+
+model Expense {
+  id        Int      @id @default(autoincrement())
+  date      DateTime @db.Date
+  concept   String   @db.VarChar(160)
+  category  String   @db.VarChar(60)
+  amount    Int
+  createdAt DateTime @default(now())
+
+  @@index([date])
+  @@map("expenses")
+}
+
+model Campaign {
+  id      Int      @id @default(autoincrement())
+  date    DateTime
+  subject String   @db.VarChar(200)
+  total   Int
+  sent    Int
+  failed  Int
+
+  @@map("campaigns")
+}
+
+// Valores editables sin tocar código (alias de pago, tarifas de envío, etc.)
+model Setting {
+  key   String @id @db.VarChar(80)
+  value Json
+
+  @@map("settings")
+}
