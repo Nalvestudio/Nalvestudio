@@ -1,0 +1,25 @@
+# Base de datos local para desarrollo: docker compose up -d
+services:
+  db:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: nalv
+      MYSQL_USER: nalv
+      MYSQL_PASSWORD: nalv
+      MYSQL_ROOT_PASSWORD: root
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_ai_ci"]
+    ports: ["3306:3306"]
+    volumes: ["nalv-db:/var/lib/mysql"]
+  # Admin web de la base: http://localhost:8080
+  phpmyadmin:
+    image: phpmyadmin:5.2
+    restart: unless-stopped
+    depends_on: [db]
+    environment:
+      PMA_HOST: db
+      PMA_USER: nalv
+      PMA_PASSWORD: nalv
+    ports: ["9090:80"]
+volumes:
+  nalv-db:

@@ -1,0 +1,24 @@
+{
+  "name": "nalv-next",
+  "private": true,
+  "version": "0.1.0",
+  "description": "nalv.estudio — migración a Next.js + MySQL (Prisma)",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "test": "bun run --cwd packages/shared test && tsx --test tools/migrate-from-json/test/*.test.ts",
+    "dev": "bun run --cwd apps/web dev",
+    "build": "bun run --cwd apps/web build",
+    "db:migrate": "bun run --cwd apps/web prisma:migrate",
+    "migrar-datos": "bun run --cwd apps/web migrar",
+    "typecheck": "bun run --cwd packages/shared typecheck && bun run --cwd apps/web typecheck && tsc -p tools/migrate-from-json/tsconfig.json",
+    "migrar-simulacro": "tsx tools/migrate-from-json/migrate.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "@types/node": "^22.0.0"
+  }
+}
